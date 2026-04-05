@@ -13,8 +13,9 @@
 | Repo/Tool | Enfoque | Fortaleza | Debilidad |
 |-----------|---------|-----------|-----------|
 | **agent-skills** (Osmani) | 19 skills markdown, flujo lineal | Cobertura completa del ciclo, coherente | Prompts genericos, no entiende contexto del proyecto |
-| **Superpowers** (obra) | 136k stars, ecosystem de prompts optimizados | Prompts refinados por comunidad, battle-tested | Mas enfocado en prompts individuales que en flujo |
-| **Cursor Rules** (collections) | Reglas por proyecto/lenguaje | Muy especificas al stack, faciles de adoptar | Sin flujo de trabajo, solo constrains |
+| **Superpowers** (obra) | 136k stars, psicologia de persuasion en LLMs | Anti-racionalizacion, borrado punitivo, subagents, regla 1% | Menos cobertura tecnica (no security/perf/deprecation) |
+| **claude-mem** (thedotmack) | 45k stars, memoria auto-captura | Comprime con AI, inyecta en futuras sesiones | Solo memoria, sin workflow |
+| **Cursor Rules** (PatrickJS) | 38k stars, reglas por framework/lenguaje | Muy especificas al stack, faciles de adoptar | Sin flujo de trabajo, solo constraints |
 | **Harper Reed workflow** | Spec -> AI critique -> plan -> slices | Muy practico, probado en produccion | Manual, no automatizado |
 | **Kent Beck approach** | "AI is my intern", tasks pequenas | Pragmatico, basado en decadas de experiencia | No formalizado, depende del criterio del senior |
 | **Daniel Miessler** | "Generate then curate" | Rapido para explorar, menos friccion | Riesgo de anclar en output mediocre |
@@ -49,38 +50,80 @@ Fuentes: Kent Beck (Substack), Thorsten Ball (blog), Simon Willison, Google inte
 
 ## 2. Tareas de investigacion: repos existentes
 
-### Por cada repo, analizar que hace mejor y que podemos incorporar
+### 2.0 Hallazgos de Superpowers (investigacion completada)
 
-- [ ] **2.1** Analizar Superpowers (obra/superpowers) en detalle
-  - Descargar repo, leer prompts de cada fase
-  - Identificar los top 5 prompts mas refinados
-  - Comparar calidad de output vs agent-skills en las mismas fases
-  - **Pregunta**: Podemos sustituir SKILL.md por prompts de Superpowers donde sean mejores?
+**Repo**: https://github.com/obra/superpowers (136K stars, MIT)
+**Creador**: Jesse Vincent. En marketplace oficial de Claude Code desde enero 2026.
 
-- [ ] **2.2** Analizar las mejores "Cursor Rules" collections
-  - Repos: cursor.directory, awesome-cursorrules, PatrickJS/awesome-cursorrules
-  - Extraer patrones comunes: que constraints usan todos?
-  - **Pregunta**: Hay constraints que deberian ser universales en nuestro toolkit?
+**Skills de Superpowers**:
+- `test-driven-development` — RED-GREEN-REFACTOR estricto. 11 excusas documentadas con rebuttals. **BORRA codigo escrito antes del test**.
+- `systematic-debugging` — 4 fases: reproducir, localizar, reducir, fix+guard
+- `verification-before-completion` — Evidencia requerida antes de declarar "done"
+- `brainstorming` — Refinamiento socratico con preguntas antes de codigo
+- `writing-plans` — Tareas de 2-5 min con paths exactos y pasos de verificacion
+- `executing-plans` — Ejecucion batch con checkpoints humanos
+- `dispatching-parallel-agents` — Fan-out a subagentes
+- `subagent-driven-development` — Subagente fresco por tarea, review en 2 fases
+- `using-git-worktrees` — Workspace aislado en branch nuevo
+- `using-superpowers` — Meta-skill: "si hay 1% de chance, DEBES invocar el skill"
 
-- [ ] **2.3** Analizar workflow de Harper Reed (spec-first con AI critique)
-  - Su post original y variaciones
-  - Paso clave diferencial: **AI critica la spec** antes de planificar
-  - **Pregunta**: Deberiamos anadir un paso de "AI critique" entre spec y plan?
+**Tecnicas clave de Superpowers (que no tiene agent-skills)**:
+1. **Anti-racionalizacion**: Tablas de excusas del LLM + rebuttals explicitos
+2. **Borrado punitivo**: Codigo pre-test se borra, no se adapta
+3. **Invocacion obligatoria**: Regla del 1% — threshold muy bajo
+4. **Prioridad 3-tier**: User > Skills > System prompt
+5. **Subagent architecture**: Tareas complejas a agentes frescos con review
 
-- [ ] **2.4** Analizar approach de Kent Beck (AI as intern)
-  - Sus posts en Substack sobre prompts de TDD con AI
-  - Pattern: test-first humano, implementacion AI
-  - **Pregunta**: Nuestro /test deberia forzar que los tests se escriban ANTES del codigo?
+**Tecnicas clave de agent-skills (que no tiene Superpowers)**:
+1. Seguridad: OWASP Top 10, hardening
+2. Performance: Core Web Vitals, profiling
+3. API design: Hyrum's Law, contratos
+4. Deprecation/migration: safe removal patterns
+5. CI/CD y ADRs: documentacion de decisiones
 
-- [ ] **2.5** Analizar approach de Daniel Miessler (generate then curate)
-  - Cuando es mejor generar multiples candidatos y elegir?
-  - **Pregunta**: Podemos incorporar un modo "exploration" que genere 3 opciones?
+**Otros repos relevantes descubiertos**:
+| Repo | Stars | Utilidad |
+|------|-------|----------|
+| claude-mem (thedotmack) | 45K | Auto-captura + compresion de contexto |
+| awesome-cursorrules (PatrickJS) | 38K | 100+ .cursorrules por framework |
+| awesome-claude-code (hesreallyhim) | 36K | Curado de skills, hooks, plugins |
+| VoltAgent/awesome-agent-skills | 14K | 1060+ skills de equipos oficiales |
+| refly-ai/refly | 7K | Builder de skills via "vibe workflow" |
+| system-prompts-and-models (x1xhlol) | 134K | System prompts extraidos de 30+ tools |
 
-- [ ] **2.6** Compilar "best-of-breed" por fase
-  - Para cada fase (idea, spec, plan, build, test, review, ship):
-    - Cual repo/approach tiene el mejor prompt?
-    - Que tecnicas concretas usa que los demas no?
-    - Cual seria el prompt hibrido optimo?
+### 2.1-2.6 Tareas de analisis profundo
+
+- [ ] **2.1** Descargar Superpowers y extraer las anti-rationalization tables
+  - Mapear cada tabla a nuestras fases
+  - Incorporar las que apliquen a nuestros SKILL.md
+  - **Decision**: Adoptar el patron de borrado punitivo en TDD? (agresivo pero efectivo)
+
+- [ ] **2.2** Analizar PatrickJS/awesome-cursorrules (38K stars)
+  - Extraer los 10 constraints mas comunes cross-framework
+  - **Pregunta**: Hay constraints universales que deberian estar en nuestro toolkit?
+
+- [ ] **2.3** Incorporar pattern de Harper Reed: AI critique entre spec y plan
+  - AI genera contra-argumentos a la spec antes de planificar
+  - Resuelve el "yes-man problem" documentado por Simon Willison
+
+- [ ] **2.4** Adoptar Kent Beck TDD pattern: tests humanos primero
+  - Humano define QUE testear, AI escribe los tests, AI implementa para pasar tests
+  - **Progressive disclosure**: spec -> tests -> implementacion (no spec -> implementacion -> tests)
+
+- [ ] **2.5** Evaluar "generate then curate" de Miessler para fase de idea
+  - AI genera 3 implementaciones candidatas, humano elige
+  - Solo para fase exploratoria, no para produccion
+
+- [ ] **2.6** Compilar prompt hibrido best-of-breed por fase
+  | Fase | Base | Mejora Superpowers | Mejora otros |
+  |------|------|--------------------|-------------|
+  | Idea | Osmani idea-refine | Brainstorming socratico | Miessler multi-gen |
+  | Spec | Osmani spec-driven | Anti-rationalization table | Harper Reed AI critique |
+  | Plan | Osmani task-breakdown | writing-plans (2-5 min tasks) | Exact file paths |
+  | Build | Osmani incremental | subagent-driven-dev | Kent Beck test-first |
+  | Test | Osmani TDD | **Borrado punitivo** + 11 rebuttals | Kent Beck human-tests |
+  | Review | Superpowers code-review | 2-stage review (spec + quality) | Osmani 5-axis |
+  | Ship | Osmani shipping | verification-before-completion | Cursor Rules safety |
 
 ---
 
