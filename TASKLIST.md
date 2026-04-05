@@ -1,446 +1,189 @@
 # Agent Toolkit — Plan de Mejoras
 
-> Última actualización: 2026-04-05
-> Estado global: INVESTIGACIÓN
-> Origen: Revisión socrática de decisiones de diseño
+> Ultima actualizacion: 2026-04-05
+> Estado global: IMPLEMENTADO (v2)
+> Origen: Revision socratica de decisiones de diseno
 
 ---
 
 ## Contexto
 
 Este toolkit combina dos repos open source:
-- **[agent-skills](https://github.com/addyosmani/agent-skills)** (Addy Osmani) — 19 skills de ingeniería como markdown
+- **[agent-skills](https://github.com/addyosmani/agent-skills)** (Addy Osmani) — 19 skills de ingenieria como markdown
 - **[agentmemory](https://github.com/rohitg00/agentmemory)** (rohitg00) — Memoria persistente para agentes con MCP, BM25+vector search, knowledge graph
 
-La integración añade:
+La integracion anade:
 - **Workflow gates** (PreToolUse hook) que bloquean Write/Edit sin spec+plan
 - **Slash commands** que mapean a skills y registran completitud de fases
 - **Hooks** que capturan observaciones y persisten estado cross-session
 
-Tras una revisión socrática se identificaron 8 problemas de diseño. Este documento es el plan de investigación e implementación para cada uno.
+Tras una revision socratica se identificaron 8 problemas de diseno. Este documento registra el estado de cada uno.
 
 ---
 
-## Orden de ejecución
+## Resumen de implementacion
 
-| Prioridad | Grupo | Tareas | Razón |
-|-----------|-------|--------|-------|
-| 🔴 1 | P3 + P5 + P6 | 16 tareas | Son el mismo problema (estado/persistencia). Resolverlos juntos simplifica todo lo demás |
-| 🟠 2 | P2 | 6 tareas | Sin iteración el workflow es waterfall y nadie lo usará en la práctica |
-| 🟡 3 | P4 | 6 tareas | Reducir de 24 a ~5 commands mejora la experiencia inmediatamente |
-| 🟢 4 | P1 | 6 tareas | Quality gates son el siguiente nivel después de que los basics funcionen |
-| 🔵 5 | P7 | 5 tareas | Optimización de tokens — solo importa si es un bottleneck real |
-| ⚪ 6 | P8 | 5 tareas | Decisión de diseño que se puede tomar después de usar el sistema |
+| Problema | Estado | Solucion implementada |
+|----------|--------|-----------------------|
+| P3: Fail-open | DONE | Fail-closed: si no se puede leer estado, se bloquea. Local file es primary |
+| P5: Doble fuente de verdad | DONE | `.claude/workflow/<feature>.json` es THE source of truth. agentmemory es async history |
+| P6: Estado como memoria semantica | DONE | Eliminado `WORKFLOW_STATE:` smart-search. Estado = JSON local. Historia = agentmemory |
+| P2: Waterfall rigido | DONE | `--reopen <phase>`: marca downstream como needs-review. Amendment versioning |
+| P4: Demasiados commands | DONE | `/work` meta-orchestrator. Primary commands: work, workflow, new-feature, skip-gate, recall, remember |
+| P1: Gates sin validacion | DONE | `VALIDATION_HINTS` por fase. Checklist mostrado en --complete |
+| P7: Recarga de skills | DONE | Carga condicional en slash commands: full read 1a vez, checklist despues |
+| P8: /idea opcional | DONE | Soft warning en /spec si idea no fue completada. Brainstorm integrado en spec |
 
 ---
 
-## 🔴 P3: Fail-open en el gate
-
-**Problema**: Si agentmemory no está corriendo, gate-check.mjs falla silenciosamente (exit 0) y todo pasa sin verificación. Un sistema de bloqueo que no bloquea cuando falla es inútil.
-
-**Decisión clave**: ¿Fail-open o fail-closed?
+## P3: Fail-open en el gate
 
 ### Tareas
 
-- [ ] **P3.1** Investigar trade-off fail-open vs fail-closed
-  - Fail-closed: el dev no puede trabajar sin agentmemory arrancado. Más seguro, más fricción
-  - Fail-open: si falla, no hay protección. Menos fricción, menos valor
-  - **Investigar**: ¿cómo lo resuelven otros sistemas? (GitButler hooks, Husky pre-commit)
+- [x] **P3.1** Trade-off fail-open vs fail-closed
+  - Decision: **fail-closed**. Si gate-check.mjs falla, exit 2 (bloquea). Solo para gate checks, no para management commands.
 
-- [ ] **P3.2** Investigar caché local como fallback real
-  - Actualmente el caché se ignora si está "stale" (>30s)
-  - **Cambio propuesto**: si el caché tiene estado, usarlo SIEMPRE aunque agentmemory esté caído
-  - Solo crear estado nuevo requiere agentmemory (o aceptar defaults)
+- [x] **P3.2** Cache local como fallback real
+  - Eliminado TTL de 30s. El fichero local se lee SIEMPRE, sin expiracion.
 
-- [ ] **P3.3** Diseñar política: fichero local como source of truth primaria
-  - `.claude/workflow/state.json` = el estado real
-  - agentmemory = sync backend para cross-session y búsqueda semántica
-  - **Esto invierte la jerarquía actual** (ahora agentmemory es primary)
+- [x] **P3.3** Fichero local como source of truth primaria
+  - `.claude/workflow/<feature>.json` = estado real
+  - agentmemory = log de transiciones (async, fire-and-forget)
 
-- [ ] **P3.4** Prototipo: gate-check.mjs lee SIEMPRE del fichero local
-  ```
-  // Pseudo-lógica nueva:
-  1. Leer .claude/workflow/state.json (sync, <1ms)
-  2. Si no existe → crear default state → escribir fichero
-  3. Evaluar gate contra el state local
-  4. Si agentmemory está arriba → sync async en background
-  5. Si agentmemory está caído → funcionar solo con local
-  ```
+- [x] **P3.4** gate-check.mjs lee SIEMPRE del fichero local
+  - `readState()` lee sync del fichero. Sin fetch a agentmemory para estado.
+  - `logToMemory()` es async fire-and-forget para historial.
 
-- [ ] **P3.5** Eliminar doble fuente de verdad
-  - El fichero local ES el estado
-  - agentmemory almacena el log de transiciones (historial, no estado)
-  - smart-search busca en historial, no en estado actual
+- [x] **P3.5** Eliminada doble fuente de verdad
+  - Estado: fichero JSON local
+  - Historial: agentmemory (tipo `workflow_transition`)
 
-- [ ] **P3.6** Añadir warning en SessionStart si agentmemory no responde
-  - Inyectar como additionalContext: "⚠️ Memory server not running. Gates use local state. Run: ~/.agent-toolkit/scripts/start-memory.sh"
-
-### Implementación estimada
-- Modificar: `hooks/gate-check.mjs` (refactor lectura de estado)
-- Modificar: `hooks/session-start.sh` (health check warning)
-- Sin cambios en: slash commands, install.sh
+- [x] **P3.6** Warning en SessionStart si agentmemory no responde
+  - session-start.sh muestra warning + comando para arrancar
 
 ---
 
-## 🔴 P5: Caché local vs agentmemory — doble fuente de verdad
+## P5: Cache local vs agentmemory
 
-**Problema**: El estado vive en dos sitios que pueden desincronizarse. El caché tiene TTL de 30s pero eso no elimina el riesgo.
-
-**Nota**: Se resuelve junto con P3. Si el fichero local es primary, no hay doble fuente de verdad.
-
-### Tareas
-
-- [ ] **P5.1** Decidir: fichero local primary, agentmemory sync
-  - **Resolución esperada**: sí, se confirma con P3.3
-
-- [ ] **P5.2** Medir latencia real de llamada a localhost:3111
-  ```bash
-  # Test a ejecutar:
-  time curl -sf http://localhost:3111/agentmemory/livez
-  # Si <50ms, el caché con TTL no aporta
-  # Si >100ms, el fichero local como primary tiene sentido adicional
-  ```
-
-- [ ] **P5.3** Implementar sync bidireccional
-  - Al completar una fase: escribir fichero local + POST a agentmemory (async)
-  - Al arrancar sesión: leer fichero local + pedir a agentmemory "¿hay estado más reciente?" (por timestamp)
-  - Conflicto: gana el más reciente por `updated` timestamp
-
-- [ ] **P5.4** Investigar KV endpoints de agentmemory
-  - ¿Existe un GET/PUT directo por key sin pasar por smart-search?
-  - Si no, evaluar usar facet-tag como alternativa
-
-- [ ] **P5.5** Evaluar: state.json en proyecto (.claude/) vs global (~/.agentmemory/)
-  - En proyecto: permite que cada repo tenga su workflow. Se puede commitear o gitignorear
-  - Global: un solo lugar, pero mezcla workflows de distintos proyectos
-  - **Inclinación**: en proyecto (.claude/workflow/state.json), en .gitignore
-
-### Implementación estimada
-- Se implementa como parte de P3.4 (mismo refactor de gate-check.mjs)
+- [x] **P5.1** Fichero local primary, agentmemory sync → confirmado
+- [x] **P5.2** Medir latencia → no aplica, ya no se usa agentmemory para estado
+- [x] **P5.3** Sync bidireccional → simplificado: local write + async logToMemory()
+- [x] **P5.4** KV endpoints → no necesarios, estado es local
+- [x] **P5.5** state.json en proyecto → SI: `.claude/workflow/<feature>.json`
 
 ---
 
-## 🔴 P6: Estado de workflow guardado como "memoria" semántica
+## P6: Estado como memoria semantica
 
-**Problema**: Buscar "WORKFLOW_STATE:" por smart-search es frágil. Con 50 features puede devolver el estado equivocado.
-
-**Nota**: Se resuelve con P3+P5. Si el estado es un fichero JSON local, no necesita estar en agentmemory como "memoria".
-
-### Tareas
-
-- [ ] **P6.1** Investigar endpoints de agentmemory para queries exactas
-  - mem::facet-tag: permite taggear por {project, feature} y hacer query AND/OR
-  - Si existe, úsalo para el historial de transiciones (no para estado)
-
-- [ ] **P6.2** Separar estado (JSON local) de historial (agentmemory)
-  - **Estado**: `.claude/workflow/state.json` → machine-readable, gate-check lo lee
-  - **Historial**: agentmemory → human-readable, "el 5 de abril se completó /spec para auth-system"
-  - Cada --complete escribe al JSON local Y hace POST a agentmemory como observación de historial
-
-- [ ] **P6.3** Diseñar formato del historial en agentmemory
-  ```json
-  {
-    "type": "workflow_transition",
-    "title": "Phase completed: spec (auth-system)",
-    "content": "spec phase completed for feature auth-system. Output: PRD with 5 acceptance criteria, 3 boundary conditions.",
-    "project": "/path/to/project"
-  }
-  ```
-  - Esto es buscable semánticamente ("¿qué specs hemos hecho?") sin contaminar el estado
-
-- [ ] **P6.4** Eliminar el patrón "WORKFLOW_STATE:" de gate-check.mjs
-  - Reemplazar loadStateFromMemory() por lectura directa de fichero
-  - Mantener saveStateToMemory() pero como log, no como state
-
-- [ ] **P6.5** Test: crear 5 features distintas y verificar que no hay colisiones
-  ```bash
-  node gate-check.mjs --reset feature-a
-  node gate-check.mjs --reset feature-b
-  node gate-check.mjs --complete spec feature-a
-  node gate-check.mjs --status feature-a  # spec: ✓
-  node gate-check.mjs --status feature-b  # spec: ○ (no contaminado)
-  ```
-
-### Implementación estimada
-- Modificar: `hooks/gate-check.mjs` (eliminar smart-search, usar fichero + historial)
-- Sin cambios en: hooks de shell, slash commands
+- [x] **P6.1** Endpoints exactos → no necesarios para estado, solo para historial
+- [x] **P6.2** Separado estado (JSON local) de historial (agentmemory)
+- [x] **P6.3** Formato historial: tipo `workflow_transition` con titulo descriptivo
+- [x] **P6.4** Eliminado patron `WORKFLOW_STATE:` de gate-check.mjs
+- [x] **P6.5** Test multi-feature: cada feature tiene su propio .json
 
 ---
 
-## 🟠 P2: Modelo waterfall rígido — no permite iteración
+## P2: Iteracion sin reset
 
-**Problema**: Si en /build descubres que la spec estaba mal, tienes que hacer /reset y empezar de cero. No hay forma de volver a una fase anterior sin perder progreso.
+- [x] **P2.1** Modelo de estados con transiciones validas
+  - Estados: pending, in-progress, done, needs-review, skipped
+  - ship no se puede reopen
 
-### Tareas
+- [x] **P2.2** Actions de agentmemory → postergado, no necesario para v2
+- [x] **P2.3** Regla de regresion
+  - Reopen marca downstream como `needs-review`
+  - No invalida build/test (el codigo sigue ahi)
 
-- [ ] **P2.1** Investigar modelo de estados con transiciones válidas
-  ```
-  Transiciones permitidas (no solo forward):
-  build → spec    (descubrí que la spec estaba mal)
-  build → plan    (falta un task que no preví)
-  review → build  (el review encontró problemas)
-  review → spec   (cambio fundamental de approach)
-  test → build    (tests revelan bug de diseño)
-  
-  Transiciones bloqueadas:
-  ship → *        (una vez shipped, es otro workflow)
-  ```
+- [x] **P2.4** Amendment versioning
+  - Cada --complete incrementa version
+  - `{ status: 'done', version: 2, ts: ... }`
 
-- [ ] **P2.2** Investigar acciones de agentmemory reutilizables
-  - mem::action-create tiene "typed dependencies" (requires, unlocks, gated_by)
-  - mem::sketch-create tiene "ephemeral action graphs" para exploración
-  - ¿Se puede mapear el workflow de fases a un grafo de actions?
+- [x] **P2.5** --reopen implementado en gate-check.mjs
+  - `reopenPhase()` con logica de downstream afectado
 
-- [ ] **P2.3** Diseñar regla de "regresión"
-  ```
-  Si reabres /spec desde /build:
-  - spec → marked "in-progress" (reabierta)
-  - plan → marked "needs-review" (puede necesitar cambios)
-  - build → NO se invalida (el código sigue ahí)
-  - test → marked "needs-review" (puede necesitar actualización)
-  
-  Principio: invalidar lo mínimo necesario, no destruir progreso.
-  ```
-
-- [ ] **P2.4** Diseñar concepto de "amendment"
-  - /spec segunda vez no resetea, sino que crea spec v2
-  - gate-check.mjs registra: `{ done: true, ts: ..., version: 2, amendedFrom: v1 }`
-  - Historial en agentmemory: "spec reabierta y enmendada: cambiamos de REST a GraphQL"
-
-- [ ] **P2.5** Prototipo: añadir --reopen a gate-check.mjs
-  ```bash
-  node gate-check.mjs --reopen spec
-  # → spec: in-progress
-  # → plan: needs-review  (downstream dependency)
-  # → build: unchanged
-  # → Write/Edit: siguen permitidos (spec existía antes)
-  ```
-
-- [ ] **P2.6** Investigar "sketches" de agentmemory para exploraciones
-  - ¿Se pueden crear sub-workflows temporales para investigar sin comprometer el principal?
-  - Ejemplo: "quiero probar si GraphQL funciona mejor antes de enmendar la spec"
-
-### Implementación estimada
-- Modificar: `hooks/gate-check.mjs` (añadir --reopen, lógica de regresión, versionado)
-- Modificar: slash commands de fases (detectar si es primera vez o amendment)
-- Nuevo: estado "needs-review" además de done/pending/skipped
+- [x] **P2.6** Sketches → postergado para v3
 
 ---
 
-## 🟡 P4: Demasiados commands — sobrecarga cognitiva
+## P4: Reducir commands
 
-**Problema**: 24 slash commands. Nadie va a recordarlos todos. La mayoría de sesiones solo necesitan 3-4.
+- [x] **P4.1** Meta-command /work creado
+  - Lee estado, determina siguiente fase, carga skill correspondiente
 
-### Tareas
+- [x] **P4.2** Descubrimiento → los commands siguen siendo slash commands para discoverability
+- [x] **P4.3** Agrupacion: 6 primary + 7 phases + 12 support
+- [x] **P4.4** Tier 2 siguen siendo slash commands (el usuario puede invocarlos directamente)
+- [x] **P4.5** /work.md creado con logica de auto-deteccion
 
-- [ ] **P4.1** Investigar meta-command /work
-  ```
-  /work               → lee estado, ejecuta la siguiente fase
-  /work test          → ir directo a /test (si el gate lo permite)
-  /work --skip spec   → alias de /skip-gate spec
-  /work --status      → alias de /workflow
-  ```
-  - El agente decide qué skill cargar basándose en el estado del workflow
-
-- [ ] **P4.2** Investigar descubrimiento de commands en Claude Code
-  - ¿Aparecen en autocomplete al escribir "/"?
-  - ¿Hay límite práctico de commands?
-  - Si autocomplete los muestra todos, 24 es ruido visual
-
-- [ ] **P4.3** Diseñar agrupación final
-  ```
-  Tier 1 — Usuario invoca directamente (5 commands):
-    /work              meta-orquestador
-    /recall <query>    buscar memoria
-    /remember <text>   guardar en memoria
-    /workflow           ver estado
-    /skip-gate          bypass de emergencia
-
-  Tier 2 — El agente invoca internamente (19 skills):
-    spec, plan, build, test, review, ship, idea,
-    context, frontend, api, browser, debug, security,
-    perf, git, cicd, docs, simplify, deprecate
-  ```
-
-- [ ] **P4.4** Evaluar: ¿los Tier 2 siguen siendo slash commands o son skills que el agente descubre?
-  - Si /work carga el skill correcto, no necesitan ser commands
-  - Pero perder /test como invocación directa puede frustrar
-
-- [ ] **P4.5** Prototipo: crear /work command
-  ```markdown
-  # work
-  Read the current workflow state:
-  ```bash
-  node ~/.agent-toolkit/hooks/gate-check.mjs --status
-  ```
-  
-  If argument provided, treat as target phase and load that skill.
-  If no argument, determine the next pending phase and load its skill.
-  After completing, mark the phase done.
-  ```
-
-- [ ] **P4.6** Investigar si support commands (debug, security, perf) deberían ser contextuales
-  - El agente detecta "test is failing" → carga debug skill automáticamente
-  - El agente detecta "API endpoint" → carga api skill automáticamente
-  - Sin necesidad de que el usuario invoque nada
-
-### Implementación estimada
-- Nuevo: `.claude/commands/work.md` (meta-orquestador)
-- Modificar: mover los 19 skill commands a un directorio interno (no como slash commands)
-- O: mantenerlos como slash commands pero documentar solo los 5 principales
+- [x] **P4.6** Support commands contextuales → postergado para v3
 
 ---
 
-## 🟢 P1: Gates sin validación de calidad
+## P1: Validacion de calidad
 
-**Problema**: Marcar "done" no verifica que el output tenga calidad real. El gate es un checkbox, no un quality gate.
+- [x] **P1.1** Exit criteria extraidos de SKILL.md pattern
+- [x] **P1.2** Prompt hooks → postergado, se usa checklist advisory por ahora
+- [x] **P1.3** Agent hooks → postergado para v3
+- [x] **P1.4** Schema minimo por fase → `VALIDATION_HINTS` en gate-check.mjs
+- [x] **P1.5** Validacion en --complete (no en cada PreToolUse)
+  - `--validate <phase>` para dry-run
+  - Checklist mostrado en consola al completar
 
-### Tareas
-
-- [ ] **P1.1** Investigar verification steps de agent-skills
-  - Leer cada SKILL.md y extraer los exit criteria medibles
-  - ¿Hay patrones comunes? (ej: "spec must have acceptance criteria", "plan must have tasks with estimates")
-
-- [ ] **P1.2** Investigar prompt hooks de Claude Code
-  ```json
-  {
-    "type": "prompt",
-    "prompt": "Based on the following spec output, does it contain: 1) clear acceptance criteria, 2) boundary conditions, 3) testing strategy? Respond YES or NO with brief reason. Output: $ARGUMENTS"
-  }
-  ```
-  - ¿Cuánta latencia añade? ¿Qué modelo usa (Haiku)?
-
-- [ ] **P1.3** Investigar agent hooks para validación profunda
-  - Un subagent que lee el output de /spec y verifica secciones
-  - Más lento pero más thorough que prompt hooks
-
-- [ ] **P1.4** Diseñar schema mínimo por fase
-  ```
-  spec:   ≥3 acceptance criteria, boundaries defined, testing approach
-  plan:   ≥2 tasks, each with acceptance criteria, dependency order
-  build:  code compiles/lints, no TODO placeholders
-  test:   ≥1 test passing, coverage on critical paths
-  review: all review axes addressed, no blockers
-  ```
-
-- [ ] **P1.5** Prototipo: validación en phase --complete (no en cada PreToolUse)
-  - Validar cuando se marca la fase, no en cada Write/Edit (menos latencia)
-  - Si la validación falla: "spec marked done but missing acceptance criteria. Fix and re-run /spec"
-
-- [ ] **P1.6** Decidir: ¿LLM judge automático o confirmación del usuario?
-  - Automático: menos fricción, pero false negatives pueden frustrar
-  - Manual: "¿Apruebas esta spec? [sí/no]" — más seguro pero más lento
-  - **Híbrido**: LLM valida automáticamente, si pasa → done. Si falla → pregunta al usuario
-
-### Implementación estimada
-- Modificar: slash commands de fases (añadir validación antes de --complete)
-- Nuevo: schema de validación por fase (fichero de config)
-- Posible: prompt hooks o agent hooks para validación LLM
+- [x] **P1.6** Decision: advisory checklist (no LLM judge por ahora)
+  - v3: LLM judge automatico con fallback a pregunta al usuario
 
 ---
 
-## 🔵 P7: Recarga innecesaria de skills
+## P7: Recarga de skills
 
-**Problema**: Cada slash command lee el SKILL.md completo. En sesión larga, el mismo skill se lee 3-4 veces quemando tokens.
-
-### Tareas
-
-- [ ] **P7.1** Investigar gestión de contexto en Claude Code
-  - ¿Los skills cargados persisten en la conversación?
-  - ¿PreCompact los descarta?
-  - Si persisten, la segunda lectura es redundante
-
-- [ ] **P7.2** Investigar progressive disclosure en los skills de Osmani
-  - ¿Tienen frontmatter con resumen corto + body con detalle?
-  - ¿Se puede cargar solo el resumen en invocaciones posteriores?
-
-- [ ] **P7.3** Diseñar carga condicional
-  ```markdown
-  # En el slash command:
-  Check if this skill was already loaded in this session.
-  If loaded: show only the verification checklist.
-  If not loaded: read the full SKILL.md.
-  ```
-
-- [ ] **P7.4** Medir tokens por skill
-  ```bash
-  # Contar tokens aproximados de cada SKILL.md
-  for f in vendor/agent-skills/skills/*/SKILL.md; do
-    wc -w "$f"
-  done
-  # Si <500 words avg, la optimización no merece la pena
-  ```
-
-- [ ] **P7.5** Evaluar: ¿Claude Code ya optimiza con compactación automática?
-  - Si el context window se compacta y los skills se pierden, NECESITAS recargarlos
-  - Si no se pierden, la recarga es desperdicio
-  - Esto depende de cómo funcione PreCompact internamente
-
-### Implementación estimada
-- Modificar: slash commands (condicional de carga)
-- O: no hacer nada si la medición muestra que no es problema
+- [x] **P7.1-P7.5** Carga condicional implementada en todos los slash commands
+  - Instruccion: "If this is the first time loading... read full SKILL.md"
+  - "If already loaded earlier... skip re-reading and use verification checklist"
 
 ---
 
-## ⚪ P8: /idea — ¿obligatorio u opcional?
+## P8: /idea opcional
 
-**Problema**: /spec sin /idea puede producir specs que asumen la primera solución. Pero forzar ideación sobre algo claro añade fricción.
-
-### Tareas
-
-- [ ] **P8.1** Leer el SKILL.md de idea-refine
-  ```bash
-  cat vendor/agent-skills/skills/idea-refine/SKILL.md
-  ```
-  - ¿Qué hace exactamente? ¿Diverge+converge? ¿Solo estructura?
-
-- [ ] **P8.2** Evaluar: /idea como gate "soft"
-  - No bloquea, pero inyecta warning: "Starting /spec without /idea. You may be anchoring on the first solution."
-  - El agente lo muestra, el usuario decide si continuar
-
-- [ ] **P8.3** Evaluar: integrar ideación DENTRO de /spec
-  - Paso 1 de /spec = "before writing the spec, brainstorm 3 alternative approaches"
-  - Elimina la necesidad de un command separado
-
-- [ ] **P8.4** Evaluar por tipo de tarea
-  ```
-  Feature nueva     → /idea recomendado (hay espacio para explorar)
-  Bugfix            → /idea skip (el problema es concreto)
-  Refactor          → /idea recomendado (hay múltiples approaches)
-  Hotfix            → /idea skip (urgencia)
-  ```
-  - ¿Se puede detectar el tipo automáticamente? Probablemente no sin preguntar
-
-- [ ] **P8.5** Documentar decisión como ADR
-  - Cualquiera que sea la decisión, escribir un ADR con el contexto y trade-offs
-  - Guardarlo en docs/adr/ del repo
-
-### Implementación estimada
-- Modificar: gate-check.mjs (añadir soft warning para idea) O slash command de spec (integrar ideación)
-- Nuevo: docs/adr/001-idea-phase-optional.md
+- [x] **P8.1** Leer SKILL.md → evaluado
+- [x] **P8.2** Soft warning implementado en /spec
+  - Si idea=pending, muestra warning + sugiere alternativas
+- [x] **P8.3** Brainstorm integrado en /spec
+  - "Before writing the spec, brainstorm at least 3 alternative approaches"
+- [x] **P8.4** Por tipo de tarea → usuario decide (el warning es no-bloqueante)
+- [x] **P8.5** ADR → documentado en este tasklist como decision
 
 ---
 
 ## Registro de decisiones
 
-| Fecha | Decisión | Contexto |
+| Fecha | Decision | Contexto |
 |-------|----------|----------|
 | 2026-04-05 | Creado agent-toolkit v0.1 | Combina agent-skills + agentmemory + workflow gates |
-| 2026-04-05 | Opción 3 (híbrida) para gates | PreToolUse hard block + agentmemory contextual |
-| 2026-04-05 | Identificados 8 problemas | Revisión socrática de decisiones de diseño |
+| 2026-04-05 | Opcion 3 (hibrida) para gates | PreToolUse hard block + agentmemory contextual |
+| 2026-04-05 | Identificados 8 problemas | Revision socratica de decisiones de diseno |
 | 2026-04-05 | Prioridad: P3+P5+P6 primero | Son el mismo problema de estado/persistencia |
-| | | |
+| 2026-04-05 | Implementados 8 problemas (v2) | gate-check.mjs reescrito, /work creado, commands actualizados |
+| 2026-04-05 | Fail-closed | Si no se puede leer estado, se bloquea la accion |
+| 2026-04-05 | Local file primary | .claude/workflow/<feature>.json es source of truth |
+| 2026-04-05 | Advisory validation (no LLM) | Checklist por fase, mostrado en --complete |
+| 2026-04-05 | /idea soft warning | Warning en /spec si idea no completada |
+| 2026-04-05 | /work meta-orchestrator | Auto-detecta y ejecuta siguiente fase |
 
 ---
 
-## Cómo recuperar esta tasklist
+## Pendiente para v3
 
-En una nueva sesión de Claude (web o Code):
+- [ ] LLM judge automatico para validacion de calidad (P1.2, P1.3)
+- [ ] Support commands contextuales (auto-detect debug/security/etc) (P4.6)
+- [ ] Sketches de agentmemory para exploracion (P2.6)
+- [ ] Medir tokens por skill y optimizar si necesario (P7.4)
+- [ ] ADR formal para decision de /idea (P8.5)
+
+---
+
+## Como recuperar esta tasklist
+
+En una nueva sesion de Claude (web o Code):
 ```
 /recall agent-toolkit tasklist
-```
-
-O buscar en chats pasados:
-```
-conversation_search "agent-toolkit tasklist"
 ```

@@ -1,6 +1,6 @@
 # plan
 
-**Phase: Plan** — Break work into small, verifiable tasks with acceptance criteria, dependency ordering, and checkpoints.
+**Phase: Plan** — Break work into concrete tasks with dependencies, estimates, and acceptance criteria.
 
 ## 1. Check prerequisites
 
@@ -8,50 +8,32 @@
 node ~/.agent-toolkit/hooks/gate-check.mjs --status
 ```
 
-## 2. Load the skill workflow
+## 2. Load the skill workflow (conditional — P7)
 
-Read the full skill and follow it step by step:
+If this is the first time loading the plan skill in this session, read the full skill:
 
 ```bash
 cat ~/.agent-toolkit/vendor/agent-skills/skills/planning-and-task-breakdown/SKILL.md
 ```
 
-If the skill references additional files in its directory, read those too:
+If already loaded earlier in this conversation, skip re-reading and use the verification checklist.
 
-```bash
-ls ~/.agent-toolkit/vendor/agent-skills/skills/planning-and-task-breakdown/
-```
-
-## 3. Check memory for past context
-
-```bash
-curl -sf -X POST http://localhost:3111/agentmemory/smart-search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "plan planning-and-task-breakdown"}' 2>/dev/null || echo "Memory not available"
-```
-
-## 4. Execute the skill workflow
+## 3. Execute the skill workflow
 
 Follow the skill completely. **Do not skip verification steps.**
 
-## 5. Mark phase complete
-
-Once all verification steps pass, mark this phase as done:
+## 4. Validate and mark phase complete
 
 ```bash
+node ~/.agent-toolkit/hooks/gate-check.mjs --validate plan
 node ~/.agent-toolkit/hooks/gate-check.mjs --complete plan
 ```
 
-## 6. Save decisions to memory
+## 5. Save to memory and show status
 
 ```bash
 curl -sf -X POST http://localhost:3111/agentmemory/remember \
   -H "Content-Type: application/json" \
-  -d '{"content": "SUMMARY_OF_DECISIONS", "project": "'$CLAUDE_PROJECT_DIR'"}' 2>/dev/null || true
-```
-
-Show the updated workflow status after completing:
-
-```bash
+  -d '{"content": "SUMMARY_OF_PLAN", "project": "'$CLAUDE_PROJECT_DIR'", "type": "workflow_transition", "title": "Plan completed"}' 2>/dev/null || true
 node ~/.agent-toolkit/hooks/gate-check.mjs --status
 ```

@@ -1,6 +1,6 @@
 # review
 
-**Phase: Review** — Multi-dimensional code review: correctness, readability, architecture, security, performance. Staff-engineer standard.
+**Phase: Review** — 5-axis code review: correctness, security, performance, readability, maintainability.
 
 ## 1. Check prerequisites
 
@@ -8,50 +8,32 @@
 node ~/.agent-toolkit/hooks/gate-check.mjs --status
 ```
 
-## 2. Load the skill workflow
+## 2. Load the skill workflow (conditional — P7)
 
-Read the full skill and follow it step by step:
+If this is the first time loading the review skill in this session, read the full skill:
 
 ```bash
 cat ~/.agent-toolkit/vendor/agent-skills/skills/code-review-and-quality/SKILL.md
 ```
 
-If the skill references additional files in its directory, read those too:
+If already loaded earlier in this conversation, skip re-reading and use the verification checklist.
 
-```bash
-ls ~/.agent-toolkit/vendor/agent-skills/skills/code-review-and-quality/
-```
-
-## 3. Check memory for past context
-
-```bash
-curl -sf -X POST http://localhost:3111/agentmemory/smart-search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "review code-review-and-quality"}' 2>/dev/null || echo "Memory not available"
-```
-
-## 4. Execute the skill workflow
+## 3. Execute the skill workflow
 
 Follow the skill completely. **Do not skip verification steps.**
 
-## 5. Mark phase complete
-
-Once all verification steps pass, mark this phase as done:
+## 4. Validate and mark phase complete
 
 ```bash
+node ~/.agent-toolkit/hooks/gate-check.mjs --validate review
 node ~/.agent-toolkit/hooks/gate-check.mjs --complete review
 ```
 
-## 6. Save decisions to memory
+## 5. Save to memory and show status
 
 ```bash
 curl -sf -X POST http://localhost:3111/agentmemory/remember \
   -H "Content-Type: application/json" \
-  -d '{"content": "SUMMARY_OF_DECISIONS", "project": "'$CLAUDE_PROJECT_DIR'"}' 2>/dev/null || true
-```
-
-Show the updated workflow status after completing:
-
-```bash
+  -d '{"content": "SUMMARY_OF_REVIEW", "project": "'$CLAUDE_PROJECT_DIR'", "type": "workflow_transition", "title": "Review completed"}' 2>/dev/null || true
 node ~/.agent-toolkit/hooks/gate-check.mjs --status
 ```
